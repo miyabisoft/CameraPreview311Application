@@ -2,10 +2,10 @@ apply plugin: 'com.android.model.library'
 model {
     android {
         compileSdkVersion = 23
-        buildToolsVersion = "23.0.2"
+        buildToolsVersion = "24.0.0"
 
         defaultConfig.with {
-            minSdkVersion.apiLevel = 22
+            minSdkVersion.apiLevel = 23
             targetSdkVersion.apiLevel = 23
         }
     }
@@ -28,12 +28,15 @@ model {
             // https://developer.android.com/ndk/guides/abis.html#sa
             create("arm") {
                 ndk.abiFilters.add("armeabi")
+                ndk.ldFlags.add("-L${file('src/main/jniLibs/armeabi')}".toString())
             }
             create("arm7") {
                 ndk.abiFilters.add("armeabi-v7a")
+                ndk.ldFlags.add("-L${file('src/main/jniLibs/armeabi-v7a')}".toString())
             }
             create("arm8") {
                 ndk.abiFilters.add("arm64-v8a")
+                ndk.ldFlags.add("-L${file('src/main/jniLibs/arm64-v8a')}".toString())
             }
             create("x86") {
                 ndk.abiFilters.add("x86")
@@ -48,7 +51,7 @@ model {
                 ndk.abiFilters.add("mips64")
             }
             // To include all cpu architectures, leaves abiFilters empty
-            create("all")
+            //create("all")
         }
 
     android.sources {
@@ -64,16 +67,17 @@ model {
 }
 
 dependencies {
-        compile fileTree(dir: 'libs', include: ['*.jar'])
-        compile files('/Applications/Unity/PlaybackEngines/AndroidPlayer/Variations/il2cpp/Release/Classes/classes.jar')
-        testCompile 'junit:junit:4.12'
-        compile 'com.android.support:appcompat-v7:23.2.0'
+    compile fileTree(include: ['*.jar'], dir: 'libs')
+    compile files('/Applications/Unity/PlaybackEngines/AndroidPlayer/Variations/il2cpp/Release/Classes/classes.jar')
+    testCompile 'junit:junit:4.12'
+    compile 'com.android.support:appcompat-v7:23.2.0'
+    compile project(':openCVLibrary310')
 }
 task clearJar(type: Delete) {
     delete 'build/libs' + 'CameraPluginModule.jar'
 }
 task makeJar(type: Copy) {
-    from('build/intermediates/bundles/all/release/')
+    from('build/intermediates/bundles/arm7/release/')
     into('release/')
     include('classes.jar')
     rename('classes.jar', 'CameraPluginModule.jar')

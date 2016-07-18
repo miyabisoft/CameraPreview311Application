@@ -1,6 +1,5 @@
 package miyabi.com.camerapreview311;
 
-import android.annotation.TargetApi;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Bitmap;
@@ -9,7 +8,6 @@ import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
 import android.graphics.Matrix;
 import android.graphics.Paint;
-import android.graphics.Point;
 import android.graphics.SurfaceTexture;
 import android.content.res.Configuration;
 import android.hardware.camera2.CameraAccessException;
@@ -28,9 +26,7 @@ import android.os.HandlerThread;
 import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
-
 import android.os.CountDownTimer;
-
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -47,6 +43,15 @@ import java.util.concurrent.TimeUnit;
 
 import javax.microedition.khronos.egl.EGLConfig;
 import javax.microedition.khronos.opengles.GL10;
+
+import org.opencv.core.Mat;
+import org.opencv.core.Scalar;
+import org.opencv.core.*;
+import org.opencv.core.Point;
+import org.opencv.core.Core;
+import org.opencv.core.CvType;
+import org.opencv.imgproc.Imgproc;
+import org.opencv.video.Video;
 
 class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAvailableListener {
 
@@ -109,6 +114,16 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     private Runnable updateText;
     private boolean mFlash;
     private Surface mSurface;
+    private MainRenderer mMainRender;
+
+    //  OpticalFlow
+    private boolean isCalcOpticalFlowFarneback;
+    private int mCalcOpticalFlowCount;
+    private Mat mSecondFrame;
+    private Mat mFirstFrame ;
+    private Mat mFlow;
+    private Mat mInputFrame;
+    private Mat mOutputFrame;
 
     enum CameraRotation {ROTATION_0, ROTATION_90, ROTATION_180, ROTATION_270}
 
@@ -138,8 +153,13 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     };
 
     MainRenderer(MainView view , Activity context) {
+        Log.v(TAG, "MainRenderer.MainRenderer");
+        MainRenderer mMainRender = this;
         mActivity = context;
         mView = view;
+        isCalcOpticalFlowFarneback = false;
+        mCalcOpticalFlowCount = 0;
+
         float[] vtmp = { 1.0f, -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f };
         float[] ttmp = { 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f };
         pVertex = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
@@ -148,10 +168,18 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         pTexCoord = ByteBuffer.allocateDirect(8*4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         pTexCoord.put(ttmp);
         pTexCoord.position(0);
+        Log.v(TAG, "MainRenderer.mMatFrame");
         /** スレッドUI操作用ハンドラ */
         mFlash = false;
     }
 
+    public void setTextureID(int id) {
+        mTextureID = id;
+    }
+
+    public int getTextureID() {
+        return mTextureID;
+    }
 
     public void onResume() {
         Log.v(TAG, "MainRenderer.onResume");
@@ -182,7 +210,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
 
         hProgram = loadShader ( vss_default, fss_default );
 
-        Point ss = new Point();
+        android.graphics.Point ss = new android.graphics.Point();
         mView.getDisplay().getRealSize(ss);
         Log.v(TAG, "MainRenderer.onSurfaceCreated.width :" + ss.x);
         Log.v(TAG, "MainRenderer.onSurfaceCreated.height :" + ss.y);
@@ -254,7 +282,6 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         }
 
         GLES20.glUseProgram(hProgram);
-        //nativeTexturePointer = hTex[0];
 
         int ph = GLES20.glGetAttribLocation(hProgram, "vPosition");
         int tch = GLES20.glGetAttribLocation ( hProgram, "vTexCoord" );
@@ -276,31 +303,121 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
             if ( mUpdateST ) {
                 mSTexture.updateTexImage();
                 Log.v(TAG, "MainRenderer.onDrawFrame.updateTexImage :" + mTextureID);
-                //mBitdata = getBitmap();
-                //saveBitmapToSd(mBitdata); // debug bitmap to Album
+
+                // mBitdata = getBitmap();
+                // saveBitmapToSd(mBitdata); // debug bitmap to Album
+
                 // NDKによりヒープ領域にカメラ画像データを転送..
                 sendImageDatatoNative();
+                //changeGrayData();
                 mUpdateST = false;
-                /*引数は、(Unity側のGameObject名称, Unity側の呼び出すメソッド名, Unity側に渡す文字列)*/
-                //UnityPlayer.UnitySendMessage("Quad","onCallBack", String.valueOf(hTex[0]));
             }
         }
+    }
+
+    public void updateCameraImage() {
+        mSTexture.updateTexImage();
+        Log.v(TAG, "updateCameraImage ID : " + mTextureID);
+    }
+
+    private void changeGrayData() {
+        int width = mPreviewSize.getWidth();
+        int height = mPreviewSize.getHeight();
+
+        // GLES.Texture -> ByteBuffer
+        final ByteBuffer buffer = ByteBuffer.allocate(width * height * 4);
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
+        GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
+        GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
+/*
+        // buffer -> cv::Mat
+        Mat mat = new Mat(height, width, CvType.CV_8UC4);
+        mat.put(0, 0, buffer.array());
+        // gray
+        Imgproc.cvtColor(mat , mat, Imgproc.COLOR_RGB2GRAY);
+        Imgproc.cvtColor(mat , mat, Imgproc.COLOR_GRAY2BGRA,4);
+        // cv::Mat -> buffer
+        byte[] bytes = new byte[ mat.rows() * mat.cols() * mat.channels() ];
+        mat.get(0,0, bytes);
+        buffer.put(bytes);
+*/
+        GLES20.glTexSubImage2D(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0, 0, 0,
+                width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MAG_FILTER, GLES20.GL_NEAREST);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_S, GLES20.GL_CLAMP_TO_EDGE);
+        GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_WRAP_T, GLES20.GL_CLAMP_TO_EDGE);
     }
 
     private void sendImageDatatoNative() {
         int width = mPreviewSize.getWidth();
         int height = mPreviewSize.getHeight();
-        final ByteBuffer buffer = ByteBuffer.allocate(width * height * 4);
         Log.v(TAG, "MainRenderer.sendImageDatatoNative.width = " + width);
         Log.v(TAG, "MainRenderer.sendImageDatatoNative.height = " + height);
+
+        final ByteBuffer buffer = ByteBuffer.allocate(width * height * 4);
 
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
 
-        // カメラ画像をNDkへ送る。
-        sendImageData(buffer.array(), width, height, 4);
+        // buffer -> cv::Mat
+        mInputFrame = new Mat(height, width, CvType.CV_8UC4);
+        mInputFrame.put(0, 0, buffer.array());
+        mSecondFrame = new Mat(height, width, CvType.CV_8UC4);
+        mSecondFrame.put(0, 0, buffer.array());
+
+        if (isCalcOpticalFlowFarneback == false) {
+            mFirstFrame = new Mat(height, width, CvType.CV_8UC4);
+            mFirstFrame.put(0, 0, buffer.array());
+            mCalcOpticalFlowCount = 0;
+            isCalcOpticalFlowFarneback = true;
+        } else {
+            if (mCalcOpticalFlowCount > 10) {
+                 CalcOpticalFlowFarneback(mSecondFrame, mFirstFrame);
+                // cv::Mat -> buffer
+                byte[] bytes = new byte[ mInputFrame.rows() * mInputFrame.cols() * mInputFrame.channels() ];
+                mInputFrame.get(0,0, bytes);
+                // カメラ画像をNDkへ送る。
+                sendImageData(bytes, width, height, 4);
+                isCalcOpticalFlowFarneback = false;
+            } else {
+                mCalcOpticalFlowCount++;
+            }
+        }
         buffer.clear();
+    }
+
+    // オプティカルフロー
+    private void CalcOpticalFlowFarneback(Mat second_frame, Mat first_frame) {
+        org.opencv.core.Point pt1=new org.opencv.core.Point();
+        org.opencv.core.Point pt2=new org.opencv.core.Point();
+        Scalar color;
+
+        int w = 600;
+        int h = 600;
+        int posx = (second_frame.cols()/2) - (w/2);
+        int posy = (second_frame.rows()/2) - (h/2);
+        Rect roiRect = new Rect(posx, posy, h, w);
+
+        Imgproc.cvtColor(first_frame, first_frame, Imgproc.COLOR_RGBA2GRAY);
+        Imgproc.cvtColor(second_frame, second_frame,Imgproc.COLOR_BGR2GRAY);
+
+        Mat flow = new Mat(roiRect.size(), CvType.CV_32FC2);
+        Video.calcOpticalFlowFarneback(new Mat(first_frame, roiRect),
+                                       new Mat(second_frame, roiRect),
+                                       flow,0.5,3, 15, 3, 5, 1.1,0);
+
+        for ( int i=0;i < roiRect.size().height;i+=20 ){
+            for ( int j=0;j < roiRect.size().width;j+=20 ){
+                pt1.x = j;
+                pt1.y = i;
+                pt2.x = j + flow.get(i,j)[0];
+                pt2.y = i + flow.get(i,j)[1];
+                color = new Scalar(255,255,0,255);
+                org.opencv.imgproc.Imgproc.line(mInputFrame, pt1, pt2, color, 2, 8, 0);
+            }
+        }
     }
 
     private void initTex() {
@@ -494,7 +611,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
             return;
         }
 
-        Point displaySize = new Point();
+        android.graphics.Point displaySize = new android.graphics.Point();
         mActivity.getWindowManager().getDefaultDisplay().getSize(displaySize);
 
         if (displaySize.x > displaySize.y) {

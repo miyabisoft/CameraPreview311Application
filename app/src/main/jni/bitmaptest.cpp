@@ -81,15 +81,10 @@ JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_sendImageDa
                                                                                    jbyteArray array,
                                                                                    jint w, jint h,
                                                                                    jint ch);
-JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_CameraPluginModule_setCheckdata(JNIEnv *env,
-                                                                                        jobject obj,
-                                                                                        jint data);
 JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_renderPlasma(JNIEnv *env,
                                                                                   jobject obj,
                                                                                   jobject bitmap,
                                                                                   jlong time_ms);
-JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_createCheckTexture1(
-        JNIEnv *env, jobject obj, jbyteArray array, jint w, jint h, jint ch);
 #endif
 }
 
@@ -144,28 +139,6 @@ static void UNITY_INTERFACE_API
     };
 }
 
-static void FillTextureFromCode (int width, int height, int stride, unsigned char* dst)
-{
-    for (int y = 0; y < height; ++y)
-    {
-        unsigned char* ptr = dst;
-        for (int x = 0; x < width; ++x)
-        {
-            // Write the texture pixel
-            ptr[0] = 255;
-            ptr[1] = 255;
-            ptr[2] = 0;
-            ptr[3] = 255;
-
-            // To next pixel (our pixels are 4 bpp)
-            ptr += 4;
-        }
-
-        // To next image row
-        dst += stride;
-    }
-}
-
 // --------------------------------------------------------------------------
 // GetRenderEventFunc, an example function we export which is used to get a rendering event callback function.
 UnityRenderingEvent UNITY_INTERFACE_EXPORT UNITY_INTERFACE_API GetRenderEventFunc()
@@ -181,17 +154,22 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
             GLuint textureId = (GLuint)(size_t)(g_TexturePointer);
 #ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_DEBUG,
-                                "bitmaptest.cpp", "textureId : = %d", textureId);
+            "bitmaptest.cpp", "textureId : = %d : %d", textureId, sizeof(buffer));
 #endif
             // GL_TEXTURE_2D GL_TEXTURE_EXTERNAL_OES
             glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
             glActiveTexture(GL_TEXTURE0);
+#ifdef __ANDROID__
+            __android_log_write(ANDROID_LOG_DEBUG, "bitmaptest.cpp", "glBindTexture1");
+#endif
             glBindTexture(GL_TEXTURE_2D, textureId);
             assert(glGetError() == GL_NO_ERROR);
-            // glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_width, g_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
+            //glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, g_width, g_height, 0, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, g_width, g_height, GL_RGBA, GL_UNSIGNED_BYTE, buffer);
             assert(glGetError() == GL_NO_ERROR);
-
+#ifdef __ANDROID__
+            __android_log_write(ANDROID_LOG_DEBUG, "bitmaptest.cpp", "glBindTexture2");
+#endif
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
             glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
@@ -201,36 +179,12 @@ static void UNITY_INTERFACE_API OnRenderEvent(int eventID)
             status = 0;
 #ifdef __ANDROID__
             __android_log_print(ANDROID_LOG_DEBUG,
-                                "bitmaptest.cpp", "cunt : = %d", ++cunt);
+            "bitmaptest.cpp", "cunt : = %d", ++cunt);
 #endif
 
         }
     }
 }
-
-void createCheckTexture(unsigned char* arr, int w, int h, int ch)
-{
-    // test data
-    int n = 0;
-    for (int i = 0; i < w; ++i) {
-        for (int j = 0; j < h; ++j) {
-            for (int k = 0; k < ch; ++k) {
-                arr[n++] = ( (i + j) % 2 == 0 ) ? 255 : 0;
-            }
-        }
-    }
-}
-
-static int chkdata = 100;
-int getCheckData()
-{
-    return chkdata;
-}
-void setCheckData(int val)
-{
-    chkdata = val;
-}
-
 
 int getWidth() {
     return g_width;
@@ -264,13 +218,6 @@ void setImadeDatatoUnity(unsigned char *buf)
     }
 }
 
-#ifdef __ANDROID__
-JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_CameraPluginModule_setCheckdata(JNIEnv * env, jobject  obj,  jint data)
-{
-    chkdata = data;
-}
-
-
 JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_sendImageData(JNIEnv * env, jobject  obj, jbyteArray array,  jint w, jint h, jint ch)
 {
     if (status == 0) {
@@ -302,21 +249,6 @@ JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_sendImageDa
     }
 }
 
-JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_createCheckTexture1(JNIEnv * env, jobject  obj, jbyteArray array,  jint w, jint h, jint ch)
-{
-    int texWidth;
-    int texHeight;
-    int chno;
-
-    int len = env->GetArrayLength (array);
-    unsigned char* buf = new unsigned char[len];
-    env->GetByteArrayRegion (array, 0, len, reinterpret_cast<jbyte*>(buf));
-    texWidth = w;
-    texHeight = h;
-    chno = ch;
-    createCheckTexture(buf, texWidth, texHeight, chno);
-}
-
 JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_renderPlasma(JNIEnv * env, jobject  obj, jobject bitmap,  jlong  time_ms) {
     void *pixels;
     int ret = 0;
@@ -327,4 +259,3 @@ JNIEXPORT void JNICALL Java_miyabi_com_camerapreview311_MainRenderer_renderPlasm
 
     AndroidBitmap_unlockPixels(env, bitmap);
 }
-#endif

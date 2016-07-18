@@ -1,7 +1,6 @@
 package miyabi.com.camerapreview311;
 
 import android.app.Activity;
-import android.content.Context;
 import android.opengl.GLSurfaceView;
 import android.util.Log;
 import android.view.SurfaceHolder;
@@ -12,10 +11,13 @@ import android.view.SurfaceHolder;
 public class MainView extends GLSurfaceView {
     MainRenderer mRenderer;
     protected final static String TAG = "MainView";
+    Activity mContext;
 
     public MainView(Activity context) {
         super ( context);
-        mRenderer = new MainRenderer(this, context);
+        mContext = context;
+        Log.v(TAG, "MainView.MainView");
+        mRenderer = new MainRenderer(this, mContext);
         setEGLContextClientVersion(2);
         setRenderer(mRenderer);
         setRenderMode(GLSurfaceView.RENDERMODE_WHEN_DIRTY );
