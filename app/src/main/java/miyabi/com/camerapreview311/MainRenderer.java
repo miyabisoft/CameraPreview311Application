@@ -6,7 +6,6 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
-import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.SurfaceTexture;
 import android.content.res.Configuration;
@@ -27,6 +26,7 @@ import android.util.Log;
 import android.util.Size;
 import android.view.Surface;
 import android.os.CountDownTimer;
+import android.opengl.Matrix;
 import java.io.BufferedOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -101,7 +101,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     private boolean mInitialized = false;
     private Size mImageSize;
     private Size mCameraSize;
-    public Size mPreviewSize = new Size(1024, 1024 );
+    public Size mPreviewSize = new Size(1024, 1024);
     //public Size mPreviewSize = new Size(1080, 1920 );
 
     private HandlerThread mBackgroundThread;
@@ -161,6 +161,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         mCalcOpticalFlowCount = 0;
 
         float[] vtmp = { 1.0f, -1.0f, -1.0f, -1.0f, 1.0f, 1.0f, -1.0f, 1.0f };
+        //float[] vtmp = { -1.0f, 1.0f, -1.0f, -1.0f, 1.0f, 1.0f, 1.0f, -1.0f };
         float[] ttmp = { 1.0f, 1.0f, 0.0f, 1.0f, 1.0f, 0.0f, 0.0f, 0.0f };
         pVertex = ByteBuffer.allocateDirect(8 * 4).order(ByteOrder.nativeOrder()).asFloatBuffer();
         pVertex.put(vtmp);
@@ -261,7 +262,70 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         }
         pTexCoord.position(0);
 
-        GLES20.glViewport(0, 0, mImageSize.getWidth(), mImageSize.getHeight());
+        // 設定したいアスペクト比=カメラプレビュー映像サイズのアスペクト比を計算する
+        int video_width;
+        int video_height;
+        int view_width;
+        int view_height;
+        video_width = mCameraSize.getWidth();
+        video_height = mCameraSize.getHeight();
+        view_width = mPreviewSize.getWidth();
+        view_height = mPreviewSize.getHeight();
+/*
+        final double req = (double)video_width / (double)video_height;
+        // View自体の表示領域のアスペクト比を計算する
+        final double view_aspect = view_width / (double)view_height;
+        // 上下左右中央に表示するためのオフセット[ピクセル]
+        int x, y;
+        // viewportの幅と高さ[ピクセル]
+        int width, height;
+        if (view_aspect > req) {
+            // Viewのアスペクト比の方がカメラプレビューサイズのアスペクト比よりも大きければ
+            // プレビューサイズのアスペクト比と同じになるようにViewの高さ基準で描画領域の幅を計算する。
+            y = 0;
+            height = view_height;
+            width = (int)(req * view_height);
+            x = (view_width - width) / 2;
+        } else {
+            // Viewのアスペクト比の方がカメラプレビューサイズのアスペクト比よりも小さければ
+            // プレビューサイズのアスペクト比と同じになるようにViewの幅基準で描画領域の高さを計算する。
+            x = 0;
+            width = view_width;
+            height = (int)(view_width / req);
+            y = (view_height - height) / 2;
+        }
+// Viewportを設定する
+        Log.v(TAG, "setConfig x: y: " + x + " , " + y);
+        Log.v(TAG, "setConfig width: height: " + width + " , " + height);
+        GLES20.glViewport(x, y, width, height);
+*/
+        final double scale_x = view_width / video_width;
+        final double scale_y = view_height / video_height;
+        //final double scale = Math.min(scale_x, scale_y);
+        final double scale = Math.max(scale_x, scale_y);
+        final double width = scale * video_width;
+        final double height = scale * video_height;
+        float[] mMvpMatrix = new float[16];//下の三つを乗算した行列
+
+        android.opengl.Matrix.setIdentityM(mMvpMatrix, 0);
+        android.opengl.Matrix.scaleM(mMvpMatrix, 0, (float)(width / view_width),
+                (float)(height / view_height), 1.0f);
+        GLES20.glViewport(0, 0, view_width, view_height);
+/*
+        android.graphics.Point displaySize = new android.graphics.Point();
+        mActivity.getWindowManager().getDefaultDisplay().getSize(displaySize);
+        Size textureSize = mCameraSize;
+        Log.v(TAG, "textureSize : " + textureSize);
+        Log.v(TAG, "displaySize : " + displaySize);
+        android.graphics.Point textureOrigin = new android.graphics.Point(
+                (displaySize.x - textureSize.getWidth()) / 2,
+                (displaySize.y - textureSize.getHeight()) / 2);
+        Log.v(TAG, "textureOrigin : " + textureOrigin);
+
+        GLES20.glViewport(textureOrigin.x, textureOrigin.y,
+                textureSize.getWidth(), textureSize.getHeight());
+*/
+        // GLES20.glViewport(0, 0, mImageSize.getWidth(), mImageSize.getHeight());
     }
 
     // 毎フレームごとに呼び出される。
@@ -287,37 +351,33 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         int tch = GLES20.glGetAttribLocation ( hProgram, "vTexCoord" );
 
         GLES20.glVertexAttribPointer(ph, 2, GLES20.GL_FLOAT, false, 4 * 2, pVertex);
+        // テクスチャーの向き
         GLES20.glVertexAttribPointer(tch, 2, GLES20.GL_FLOAT, false, 4 * 2, pTexCoord);
         GLES20.glEnableVertexAttribArray(ph);
         GLES20.glEnableVertexAttribArray(tch);
-
         GLES20.glActiveTexture(GLES20.GL_TEXTURE0);
-
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
-
         GLES20.glUniform1i(GLES20.glGetUniformLocation(hProgram, "sTexture"), 0);
-
         GLES20.glDrawArrays(GLES20.GL_TRIANGLE_STRIP, 0, 4);
         GLES20.glFlush();
+
         synchronized(this) {
             if ( mUpdateST ) {
                 mSTexture.updateTexImage();
                 Log.v(TAG, "MainRenderer.onDrawFrame.updateTexImage :" + mTextureID);
 
+                // NDKによりヒープ領域にカメラ画像データを転送..
+                sendImageDatatoNative();
+
                 // mBitdata = getBitmap();
                 // saveBitmapToSd(mBitdata); // debug bitmap to Album
 
-                // NDKによりヒープ領域にカメラ画像データを転送..
-                sendImageDatatoNative();
-                //changeGrayData();
                 mUpdateST = false;
             }
         }
-    }
 
-    public void updateCameraImage() {
-        mSTexture.updateTexImage();
-        Log.v(TAG, "updateCameraImage ID : " + mTextureID);
+        GLES20.glUseProgram(0);
+        GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0);
     }
 
     private void changeGrayData() {
@@ -329,7 +389,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
-/*
+
         // buffer -> cv::Mat
         Mat mat = new Mat(height, width, CvType.CV_8UC4);
         mat.put(0, 0, buffer.array());
@@ -340,7 +400,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         byte[] bytes = new byte[ mat.rows() * mat.cols() * mat.channels() ];
         mat.get(0,0, bytes);
         buffer.put(bytes);
-*/
+
         GLES20.glTexSubImage2D(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, 0, 0, 0,
                 width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
         GLES20.glTexParameteri(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, GLES20.GL_TEXTURE_MIN_FILTER, GLES20.GL_NEAREST);
@@ -352,11 +412,15 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     private void sendImageDatatoNative() {
         int width = mPreviewSize.getWidth();
         int height = mPreviewSize.getHeight();
-        Log.v(TAG, "MainRenderer.sendImageDatatoNative.width = " + width);
+/*
+        Log.v(TAG, "MainRenderer.sendImageDatatoNative.width1 = " + width);
         Log.v(TAG, "MainRenderer.sendImageDatatoNative.height = " + height);
-
+        Log.v(TAG, "MainRenderer.sendImageDatatoNative.mCameraWidth" + mCameraSize.getWidth());
+        Log.v(TAG, "MainRenderer.sendImageDatatoNative.mCameraHeight" + mCameraSize.getHeight());
+*/
         final ByteBuffer buffer = ByteBuffer.allocate(width * height * 4);
 
+        GLES20.glUseProgram(hProgram);
         GLES20.glBindTexture(GLES11Ext.GL_TEXTURE_EXTERNAL_OES, mTextureID);
         GLES20.glReadPixels(0, 0, width, height, GLES20.GL_RGBA, GLES20.GL_UNSIGNED_BYTE, buffer);
         GLES20.glBindFramebuffer(GLES20.GL_FRAMEBUFFER, 0);
@@ -370,6 +434,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         if (isCalcOpticalFlowFarneback == false) {
             mFirstFrame = new Mat(height, width, CvType.CV_8UC4);
             mFirstFrame.put(0, 0, buffer.array());
+
             mCalcOpticalFlowCount = 0;
             isCalcOpticalFlowFarneback = true;
         } else {
@@ -394,30 +459,46 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         org.opencv.core.Point pt2=new org.opencv.core.Point();
         Scalar color;
 
-        int w = 600;
-        int h = 600;
+        int w = 300;
+        int h = 300;
         int posx = (second_frame.cols()/2) - (w/2);
         int posy = (second_frame.rows()/2) - (h/2);
+
+        Log.v(TAG, "CalcOpticalFlowFarneback posx: posy: " + posx + " , " + posy);
+        Log.v(TAG, "CalcOpticalFlowFarneback w h " + second_frame.cols() + " " + second_frame.rows());
         Rect roiRect = new Rect(posx, posy, h, w);
+        //Rect roiRect = new Rect(-1, 0, h, w);
 
         Imgproc.cvtColor(first_frame, first_frame, Imgproc.COLOR_RGBA2GRAY);
-        Imgproc.cvtColor(second_frame, second_frame,Imgproc.COLOR_BGR2GRAY);
+        Imgproc.cvtColor(second_frame, second_frame,Imgproc.COLOR_RGBA2GRAY);
+/*
+        org.opencv.imgproc.Imgproc.rectangle(mInputFrame,
+                        new Point((second_frame.cols()/2)-w/2,
+                        (second_frame.rows()/2)-h/2),
+                new Point((second_frame.cols()/2)+w/2,
+                        (second_frame.rows()/2)+h/2), new Scalar(0, 255, 0), 10);
+*/
 
         Mat flow = new Mat(roiRect.size(), CvType.CV_32FC2);
         Video.calcOpticalFlowFarneback(new Mat(first_frame, roiRect),
                                        new Mat(second_frame, roiRect),
                                        flow,0.5,3, 15, 3, 5, 1.1,0);
-
         for ( int i=0;i < roiRect.size().height;i+=20 ){
             for ( int j=0;j < roiRect.size().width;j+=20 ){
                 pt1.x = j;
+                pt1.x = pt1.x + posx;
                 pt1.y = i;
+                pt1.y = pt1.y + posy;
+
                 pt2.x = j + flow.get(i,j)[0];
+                pt2.x = pt2.x + posx;
                 pt2.y = i + flow.get(i,j)[1];
+                pt2.y = pt2.y + posy;
                 color = new Scalar(255,255,0,255);
                 org.opencv.imgproc.Imgproc.line(mInputFrame, pt1, pt2, color, 2, 8, 0);
             }
         }
+
     }
 
     private void initTex() {
@@ -502,7 +583,14 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
             if (!mCameraOpenCloseLock.tryAcquire(2500, TimeUnit.MILLISECONDS)) {
                 throw new RuntimeException("Time out waiting to lock camera opening.");
             }
+
             StreamConfigurationMap map = characteristics.get(CameraCharacteristics.SCALER_STREAM_CONFIGURATION_MAP);
+            Size[] mOutputSize = map.getOutputSizes(SurfaceTexture.class);
+            for (int i = 0; i < mOutputSize.length; i++) {
+                Log.i(TAG, "size[" + i + "]" + mOutputSize[i].toString());
+            }
+
+            // カメラサイズ0番目をGlobalな関数に格納
             mCameraSize = map.getOutputSizes(SurfaceTexture.class)[0];
             manager.openCamera(mCameraID, mStateCallback, mBackgroundHandler);
 
@@ -596,8 +684,8 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         } catch (CameraAccessException e) {
             e.printStackTrace();
         }
-        setCameraRotation();
         mInitialized = true;
+        setCameraRotation();
 
         // フラッシュライト制御タスク作成
         mFlash = false;
@@ -610,7 +698,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         if (!mInitialized) {
             return;
         }
-
+/*
         android.graphics.Point displaySize = new android.graphics.Point();
         mActivity.getWindowManager().getDefaultDisplay().getSize(displaySize);
 
@@ -621,12 +709,13 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
             double scale = (double) displaySize.x / (double) mCameraSize.getHeight();
             mImageSize = new Size((int)(scale * mCameraSize.getHeight()), (int)(scale * mCameraSize.getWidth()));
         }
-
+*/
         int orientation = mActivity.getWindowManager().getDefaultDisplay().getRotation();
+        Log.e(TAG, "setCamera orientation : " + orientation);
         switch(orientation) {
             case Surface.ROTATION_0:
                 mCameraRotation = mIsPortraitDevice ? CameraRotation.ROTATION_0 : CameraRotation.ROTATION_270;
-                Log.e(TAG, "setCameraRotation 0 " + mCameraRotation);
+                Log.e(TAG, "setCameraRotation 0 " + mCameraRotation + " " + mIsPortraitDevice);
                 break;
             case Surface.ROTATION_90:
                 mCameraRotation = mIsPortraitDevice ? CameraRotation.ROTATION_90 : CameraRotation.ROTATION_0;
@@ -663,7 +752,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
     }
 
     private Bitmap getBitmap() {
-        int orientation = -90;
+        int orientation = 0;
         boolean mirror = true;
         int width = mPreviewSize.getWidth();
         int height = mPreviewSize.getHeight();
@@ -728,7 +817,7 @@ class MainRenderer implements GLSurfaceView.Renderer , SurfaceTexture.OnFrameAva
         }
         final Canvas canvas = new Canvas(bitmap);
 
-        final Matrix matrix = new Matrix();
+        final android.graphics.Matrix matrix = new android.graphics.Matrix();
         // 上下が逆さまなので垂直方向に反転させます。
         matrix.postScale(mirror ? -1.0f : 1.0f, -1.0f, width / 2, height / 2);
         // 傾きを付けます。

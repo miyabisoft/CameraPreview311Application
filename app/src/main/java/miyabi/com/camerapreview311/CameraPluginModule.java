@@ -32,7 +32,6 @@ public class CameraPluginModule {
     public int startCamera(String msg) {
         final Activity unityActivity = UnityPlayer.currentActivity;
         mContext = unityActivity;
-
         unityActivity.runOnUiThread(new Runnable() {
             public void run() {
                 mMainView = new MainView(unityActivity);
